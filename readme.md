@@ -13,3 +13,8 @@ The application employs advanced AI and the Langgraph library to create a realis
 ## Requirements
 
 You can install these packages using pip by running the following command: pip install -r requirements.txt
+
+
+## Running the App
+Use this command to run the app: streamlit run main.py
+App should be available at : http://localhost:8501/
