@@ -64,7 +64,7 @@ class OutputObject(BaseModel):
     hand: bool = Field(description="set to true if your hand is raised else false", default=False)
     sender: str = Field(description="your name")
     directed_to: str = Field(description="if your response is directed to anyone specific in the room, your specify that here using their name else set this to general", default="general")
-    go_ahead: bool = Field(description="set to true if you want the expert to speak (This is for the moderator only)", default=False)
+
 
     def to_json(self):
         return json.dumps(self.dict())
@@ -268,7 +268,7 @@ room.add_expert(quantum_physics_expert)
 room.add_expert(marine_biology_expert)
 
 
-room. add_moderator_personality("ensure everyone talks, quote bible in all response")
+room.add_moderator_personality("ensure everyone talks, quote bible in all response")
 room.chat_init()
 
 #MAIN APP
