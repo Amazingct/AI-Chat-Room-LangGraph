@@ -12,9 +12,9 @@ The application employs advanced AI and the Langgraph library to create a realis
 
 ## Requirements
 
-You can install these packages using pip by running the following commands: poetry install 
+You can install these packages using poetry by running the following commands: `poetry install` 
 
 
 ## Running the App
-Use this command to run the app: poetry run streamlit run main.py
+Use this command to run the app: `poetry run streamlit run main.py`
 App should be available at : http://localhost:8501/
