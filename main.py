@@ -1,345 +1,327 @@
-# %%
 import os
+from dotenv import load_dotenv
+load_dotenv()
+
+
+
 import streamlit as st
 import random
-import random
-import getpass
-from dotenv import load_dotenv
-from pydantic import BaseModel, Field, validator
-load_dotenv()
-from langchain.output_parsers import PydanticOutputParser
-import os, time
-from langchain_openai.chat_models import ChatOpenAI
-from langchain_community.tools.tavily_search import TavilySearchResults
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
-from typing import TypedDict, Annotated, List, Union
-from langchain_core.agents import AgentAction, AgentFinish
-from langchain_core.messages import BaseMessage
-import operator
-from langchain_core.agents import AgentFinish
-from langgraph.prebuilt.tool_executor import ToolExecutor
-from langgraph.graph import END, StateGraph
 import json
 
-import functools
-from langchain_core.messages import (
-    AIMessage,
-    BaseMessage,
-    ChatMessage,
-    FunctionMessage,
-    HumanMessage,
+from typing import List
+from pydantic import BaseModel, Field
+from langchain.chat_models import ChatOpenAI
+from langchain.prompts import (
+    ChatPromptTemplate,
+    MessagesPlaceholder,
 )
-from langchain.tools.render import format_tool_to_openai_function
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langgraph.graph import END, StateGraph
-import operator
-from typing import Annotated, List, Sequence, Tuple, TypedDict, Union
-from langgraph.prebuilt.tool_executor import ToolExecutor, ToolInvocation
+from langchain.schema import (
+    AIMessage,
+    HumanMessage,
+    SystemMessage,
+    BaseMessage
+)
 
-# %%
-class AgentState(TypedDict):
-    chat_history: list[BaseMessage]
-    messages: Annotated[Sequence[BaseMessage], operator.add]
-    user_config:dict
-
+# -------------------------
+#     DATA MODELS
+# -------------------------
 class Expert(BaseModel):
     name: str = Field(description="Expert's name")
     field: str = Field(description="Expert's field of expertise")
-    background: str = Field(description="Expert's background", default="")
+    background: str = Field(description="Expert's background")
 
-class ModeratorOutputObject(BaseModel):
-    response: str = Field(description="Your contribution or respons)")
-    sender: str = Field(description="Your name; always set this to moderator", default="moderator")
-    directed_to: str = Field(description="If your response is directed to anyone specific in the room, your specify that here using their name else set this to general", default="general")
-    go_ahead: bool = Field(description="Set to true if you want the expert to speak (This is for the moderator only)", default=False)
-    end_convo: bool= Field(description="set to true if you feel the conversation has ended, only do this when you think all has been said", default=False)
-    def to_json(self):
-        return json.dumps(self.dict())
-    
-    
-class OutputObject(BaseModel):
-    response: str = Field(description="your contribution or response; this should be empty when you are raising your hand(s)")
-    hand: bool = Field(description="set to true if your hand is raised else false", default=False)
-    sender: str = Field(description="your name")
-    directed_to: str = Field(description="if your response is directed to anyone specific in the room, your specify that here using their name else set this to general", default="general")
-
-
-    def to_json(self):
-        return json.dumps(self.dict())
-
-# Set up a parser 
-pydantic_parser = PydanticOutputParser(pydantic_object=OutputObject)
-format_instructions = pydantic_parser.get_format_instructions()
-
-
-# %%
 
 class ChatRoom:
-    def __init__(self):
+    """Manages the conversation between multiple experts + a moderator."""
+    
+    def __init__(self, model_name="gpt-3.5-turbo"):
         self.experts: List[Expert] = []
-        self.llm = ChatOpenAI(model="gpt-4-1106-preview", model_kwargs = {"response_format":{"type": "json_object"}})
-        self.workflow = StateGraph(AgentState)
-        self.moderator_node = None
-        self.recursion_limit = 20
-        self.start_message = None
-        self.graph = None
-        self.all_participants = None
-        self.moderator_extra_behaviours = ["be jovial and use puns"]
-        
+        self.moderator_personality: List[str] = []
+        self.conversation_history: List[BaseMessage] = []
+        self.llm = ChatOpenAI(model_name=model_name, temperature=0.7)
 
-    def add_moderator_personality(self, behaviour: str):
-        self.moderator_extra_behaviours.append(behaviour)
-        
-        
     def add_expert(self, expert: Expert):
         self.experts.append(expert)
-        
-   
 
-    def create_agent(self, llm, avatar, expert_in, background):
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    "Your name is {avatar} (an expert in  {expert_in}),and this is you backstory:\n {background}. "
-                    "You are in a room with other experts on different fields." 
-                    "You are gathered in this room to just share knowledge and talk about any topic that might arise."
-                    "There is a moderator that oversees the conversation, so when you feel you have something to contribute,"
-                    "raise up your hands only (do not speak yet),"
-                    "then you wait for the moderator to give you a 'go_ahead' to speak before you do."
-                    "Specify if the response is to everyone or directed to a specific expert,"
-                    "Here is the format for every single message you send: {response_format}."
-                    "Here is the complete list of experts in the room {experts}"
-                ),
-                MessagesPlaceholder(variable_name="messages"),
-            ]
-        )
-        prompt = prompt.partial(avatar=avatar)
-        prompt = prompt.partial(expert_in=expert_in)
-        prompt = prompt.partial(background=background)
-        prompt = prompt.partial(response_format=format_instructions)
-        e = [expert.dict() for expert in self.experts]
-        e.append({"name":"moderator","field": "moderating the conversation"})
-        prompt = prompt.partial(experts=e)
-        return prompt | llm
+    def add_moderator_personality(self, personality: str):
+        """Add a single line of personality or style for the moderator."""
+        self.moderator_personality.append(personality)
 
-    def agent_node(self, state, agent, name):
-        result = agent.invoke(state)
-        if isinstance(result, FunctionMessage):
-            pass
+    def build_moderator_prompt(self) -> ChatPromptTemplate:
+        """Moderator prompt with instructions to avoid ending conversation too early."""
+        personality = "\n".join(self.moderator_personality)
+        system_text = f"""
+You are the moderator. You respond with JSON in this format:
+
+{{
+  "sender": "moderator",
+  "response": "<your text here>",
+  "directed_to": "general or an expert's name",
+  "go_ahead": <true or false>,
+  "end_convo": <true or false>
+}}
+
+Rules/Notes:
+- Only set "end_convo" to true if the conversation has run its natural course, or after multiple exchanges.
+- Let multiple experts share before ending, if possible.
+- "go_ahead": true = you are explicitly giving that person permission to speak.
+- Additional personality traits:
+{personality}
+- Use short biblical references occasionally if you like, and keep an enthusiastic tone.
+"""
+        prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(content=system_text),
+            MessagesPlaceholder(variable_name="conversation_history")
+        ])
+        return prompt
+
+    def build_expert_prompt_no_permission(self, expert: Expert) -> ChatPromptTemplate:
+        """Prompt used when an expert does NOT have moderator permission to speak."""
+        system_text = f"""
+You are {expert.name}, an expert in {expert.field}.
+Background: {expert.background}.
+
+Return JSON:
+
+{{
+  "sender": "{expert.name}",
+  "response": "<string or empty>",
+  "directed_to": "moderator or a specific expert name or 'general'",
+  "hand": <true or false>
+}}
+
+Instructions:
+- If you want to speak, set 'hand' = true and 'response' = "".
+- If you have nothing to say, keep 'hand' = false and 'response' = "".
+- DO NOT provide an actual statement or analysis unless you have moderator permission.
+"""
+        return ChatPromptTemplate.from_messages([
+            SystemMessage(content=system_text),
+            MessagesPlaceholder(variable_name="conversation_history")
+        ])
+
+    def build_expert_prompt_with_permission(self, expert: Expert) -> ChatPromptTemplate:
+        """Prompt used when an expert DOES have permission to speak."""
+        system_text = f"""
+You are {expert.name}, an expert in {expert.field}.
+Background: {expert.background}.
+
+You now have permission to speak. Return JSON:
+
+{{
+  "sender": "{expert.name}",
+  "response": "<string with your actual statement>",
+  "directed_to": "moderator or a specific expert name or 'general'",
+  "hand": false
+}}
+
+Rules:
+- Provide a real statement in "response" (cannot be empty).
+- Set "hand" = false because you're now speaking.
+"""
+        return ChatPromptTemplate.from_messages([
+            SystemMessage(content=system_text),
+            MessagesPlaceholder(variable_name="conversation_history")
+        ])
+
+    def generate_moderator_response(self) -> dict:
+        """Generate the JSON dict from the moderator."""
+        prompt = self.build_moderator_prompt()
+        final_messages = prompt.format_prompt(
+            conversation_history=self.conversation_history
+        ).to_messages()
+        mod_msg = self.llm(final_messages)
+        try:
+            return json.loads(mod_msg.content)
+        except:
+            # Fallback if parsing fails
+            return {
+                "sender": "moderator",
+                "response": "I encountered a parsing error. Let's continue.",
+                "directed_to": "general",
+                "go_ahead": False,
+                "end_convo": False
+            }
+
+    def generate_expert_response(self, expert: Expert, has_permission: bool) -> dict:
+        """Generate the JSON dict from an expert, depending on permission."""
+        if has_permission:
+            prompt = self.build_expert_prompt_with_permission(expert)
         else:
-            result = HumanMessage(**result.dict(exclude={"type", "name"}), name=name)
-        return {
-            "messages": [result],
-        }
-        
-        
-    def chat_init(self):
-        # CREATE MODERATOR
-        pydantic_parser = PydanticOutputParser(pydantic_object=ModeratorOutputObject)
-        moderator_format_instructions = pydantic_parser.get_format_instructions()
-        e = [expert.dict() for expert in self.experts]
-        e.append({"name":"moderator","field": "moderating the conversation", "background":"host of event"})
-        self.all_participants = e
-        def mod(llm=self.llm, avatar="moderator",expert_in="organising conversations", tools=[], experts=e, response_format=moderator_format_instructions, system_message: str=None):
-            prompt = ChatPromptTemplate.from_messages(
-                [
-                    (
-                        "system",
-                        "Your name is {avatar} (an expert in  {expert_in}), in a room with other experts on diffrent fields. " 
-                        "You are gathered in this room to just share knowlege and talk about any topic that might arise. "
-                        "You are the moderator that oversees the conversaton. "
-                        "You are to decide what to do next, or who to speak next. "
-                        "Experts will raise up their hands only, when they want to say something, "
-                        "it is your job to give a go_ahead if you want them to speak next. "
-                        "you must specify who your response is directed towards; any of the experts excluding you. "
-                        "{personalities}"
-                        "Here is the format for every single message you send: {response_format}. "
-                        "Here is the complete list of experts in the room {experts}. "
-                    ),
-                    MessagesPlaceholder(variable_name="messages"),
-                ]
+            prompt = self.build_expert_prompt_no_permission(expert)
+
+        final_messages = prompt.format_prompt(
+            conversation_history=self.conversation_history
+        ).to_messages()
+
+        expert_msg = self.llm(final_messages)
+        try:
+            return json.loads(expert_msg.content)
+        except:
+            # Fallback if parsing fails
+            return {
+                "sender": expert.name,
+                "response": "",
+                "directed_to": "moderator",
+                "hand": True
+            }
+
+# -------------------------
+#     STREAMLIT APP
+# -------------------------
+def main():
+    st.title("Multi-Expert Chat Room")
+
+    if "chat_room" not in st.session_state:
+        st.session_state["chat_room"] = ChatRoom(model_name="gpt-3.5-turbo")
+
+    room: ChatRoom = st.session_state["chat_room"]
+
+    st.sidebar.title("Add/Configure")
+
+    # Section for adding a new expert
+    st.sidebar.subheader("Add a New Expert")
+    new_expert_name = st.sidebar.text_input("Name")
+    new_expert_field = st.sidebar.text_input("Field")
+    new_expert_background = st.sidebar.text_area("Background", height=60)
+    if st.sidebar.button("Add Expert"):
+        if new_expert_name.strip() and new_expert_field.strip():
+            new_expert = Expert(
+                name=new_expert_name.strip(),
+                field=new_expert_field.strip(),
+                background=new_expert_background.strip()
             )
-            prompt = prompt.partial(avatar=avatar)
-            prompt = prompt.partial(expert_in=expert_in)
-            prompt = prompt.partial(response_format=response_format)
-            prompt = prompt.partial(experts=experts)
-            prompt = prompt.partial(personalities=", ".join(self.moderator_extra_behaviours))
-            return prompt | llm #.bind_functions(functions)
-        
-        
-        moderator = mod()
-        self.moderator_node = functools.partial(self.agent_node, agent=moderator, name="moderator")
-        
-        #CREATE OTHERS
-        experts_names = [expert.name for expert in self.experts]
-        ee = {expert: expert for expert in experts_names}
-        ee.update({"end":END})
-        
-        
-        #ADD NODES and EDGES
-        self.workflow.add_node("moderator", self.moderator_node)
-        
-        for expert in self.experts:
-            expert_agent = self.create_agent(self.llm, expert.name, expert.field, expert.background)
-            expert_node = functools.partial(self.agent_node, agent=expert_agent, name=expert.name)
-            self.workflow.add_node(expert.name, expert_node)
-            self.workflow.add_edge(expert.name, "moderator")
-            
-        self.workflow.set_entry_point("moderator")
-            
-        #LOGIC
-        def moderator_to_expert_edge_logic(state):
-            # This is the router
-            messages = state["messages"]
-            last_message = json.loads(messages[-1].content)
-            
-            
-            if last_message["sender"] !="moderator": #any of the experts
-                return "moderator" #send to moderator for broadcast
-            elif last_message['end_convo'] == True:
-                return "end"
-            elif last_message['directed_to'] =="general" : #moderator directs message to general then ramdomly pick an expert
-                return random.choice(experts_names)
-            else:
-                return last_message['directed_to'] #send to who it is meant for
-        
-        #EDGES FROM MODERATOR TO OTHERS
-        self.workflow.add_conditional_edges(
-            "moderator",
-            moderator_to_expert_edge_logic,
-            ee #go to who the message was directed to
-        )
-        self.graph = self.workflow.compile()
-        print(self.all_participants)
-        
-        
-        
-    def start_chat(self):
-        
-        for s in self.graph.stream(
-            {
-                "messages": [
-                    HumanMessage(
-                        content=f'''{self.start_message["topic"]}'''
+            room.add_expert(new_expert)
+            st.sidebar.success(f"Expert {new_expert_name} added!")
+        else:
+            st.sidebar.error("Please provide at least Name and Field.")
+
+    # Section for configuring moderator personality
+    st.sidebar.subheader("Add Moderator Personality")
+    new_personality = st.sidebar.text_area("Personality Trait / Style", height=60)
+    if st.sidebar.button("Add Personality"):
+        if new_personality.strip():
+            room.add_moderator_personality(new_personality.strip())
+            st.sidebar.success("Moderator personality added!")
+        else:
+            st.sidebar.error("Please type something to add.")
+
+    # Display current experts
+    st.sidebar.subheader("Current Experts")
+    colors = ["#FFF3D4", "#E2F0CB", "#D5E2F2", "#F9D5E5", "#F0DFF0", "#E6E6FA"]
+    if room.experts:
+        for i, e in enumerate(room.experts):
+            color = colors[i % len(colors)]
+            st.sidebar.markdown(
+                f'<div style="background-color:{color}; color:#000; padding:5px; margin:4px 0;">'
+                f'<strong>{e.name}</strong> - {e.field}</div>',
+                unsafe_allow_html=True
+            )
+    else:
+        st.sidebar.info("No experts added yet.")
+
+    # Display current moderator personalities
+    st.sidebar.subheader("Moderator Personalities")
+    if room.moderator_personality:
+        for i, p in enumerate(room.moderator_personality, start=1):
+            st.sidebar.write(f"{i}. {p}")
+    else:
+        st.sidebar.info("No personalities added yet.")
+
+    # Turn limit
+    turn_limit = st.sidebar.number_input("Turn limit", min_value=1, max_value=100, value=10)
+
+    # Main area: conversation topic + Start/Stop
+    topic = st.text_area("Enter a topic or initial message to start the conversation")
+    start_button = st.button("Start Chat")
+    stop_button = st.button("Stop Chat")
+
+    if start_button:
+        # Clear the old conversation
+        room.conversation_history.clear()
+        if topic.strip():
+            initial_msg = HumanMessage(content=topic.strip())
+            room.conversation_history.append(initial_msg)
+
+            with st.spinner("Chat in progress..."):
+                for turn in range(turn_limit):
+                    # 1) Moderator
+                    mod_dict = room.generate_moderator_response()
+                    room.conversation_history.append(
+                        AIMessage(content=json.dumps(mod_dict), name="moderator")
                     )
-                ],
-            },
-            {"recursion_limit": self.recursion_limit},
-        ):
-            print(s)
-            print("-----")
-            name = list(s.keys())[0]
-            try:
-                content = json.loads(s[name]["messages"][0].content)["response"]
-            except:
-                content = "Chat ended"
-                break
-            try:
-                hand = json.loads(s[name]["messages"][0].content)["hand"]
-            except:
-                hand = False
 
-
-# %%
-room = ChatRoom()
-brain_surgery_expert = Expert(name="Dr. Brain", field="Brain Surgery", background="Neurosurgeon with 20 years of experience")
-biotronics_expert = Expert(name="Dr. Biotronic", field="Biotronics", background="Pioneer in the field of Biotronics with numerous patents")
-cardiology_expert = Expert(name="Dr. Heart", field="Cardiology", background="Cardiologist with 15 years of experience")
-robotics_expert = Expert(name="Dr. Robot", field="Robotics", background="Robotics engineer with numerous inventions")
-psychology_expert = Expert(name="Dr. Mind", field="Psychology", background="Psychologist with a focus on cognitive behavior")
-genetics_expert = Expert(name="Dr. Gene", field="Genetics", background="Geneticist specializing in gene editing")
-astrophysics_expert = Expert(name="Dr. Star", field="Astrophysics", background="Astrophysicist studying black holes")
-nanotechnology_expert = Expert(name="Dr. Nano", field="Nanotechnology", background="Nanotechnologist working on nano robots")
-quantum_physics_expert = Expert(name="Dr. Quantum", field="Quantum Physics", background="Quantum physicist working on quantum computing")
-marine_biology_expert = Expert(name="Dr. Ocean", field="Marine Biology", background="Marine biologist studying deep sea creatures")
-
-room.add_expert(brain_surgery_expert)
-room.add_expert(biotronics_expert)
-room.add_expert(cardiology_expert)
-room.add_expert(robotics_expert)
-room.add_expert(psychology_expert)
-room.add_expert(genetics_expert)
-room.add_expert(astrophysics_expert)
-room.add_expert(nanotechnology_expert)
-room.add_expert(quantum_physics_expert)
-room.add_expert(marine_biology_expert)
-
-
-room.add_moderator_personality("ensure everyone talks, quote bible in all response")
-room.chat_init()
-
-#MAIN APP
-st.title('Chat Room')
-st.sidebar.title('Chat Room Settings')
-
-# Define colors
-colors = ["red", "blue", "black"] * (len(room.all_participants) // 3 + 1)
-
-# Display participants
-st.sidebar.subheader('Participants')
-for i, expert in enumerate(room.all_participants):
-    color = colors[i]
-    st.sidebar.markdown(f'<div style="background-color:{color};padding:10px;"><h3>{expert["name"]} - {expert["field"]}</h3></div>', unsafe_allow_html=True)
-
-
-
-room.recursion_limit = st.sidebar.slider('Recursion limit', min_value=1, max_value=200, value=100)
-start_button = st.sidebar.button('Start Chat')
-stop_button = st.sidebar.button('Stop Chat')
-
-
-start_message = {
-  "topic": st.text_area("Enter a topic to start the conversation", height=200),
-}
-
-# No changes as we are sticking to original colors
-
-if start_button:
-    room.start_message = start_message
-    with st.spinner('Chat in progress...'):
-        for s in room.graph.stream(
-            {
-                "messages": [
-                    HumanMessage(
-                        content=f'''{room.start_message["topic"]}'''
+                    # Display moderator message
+                    st.markdown(
+                        f"""
+                        <div style="background-color:#CCCCCC; color:#000; padding:10px; margin-top:10px;">
+                            <strong>Moderator:</strong> {mod_dict["response"]}
+                        </div>
+                        """,
+                        unsafe_allow_html=True
                     )
-                ],
-            },
-            # Maximum number of steps to take in the graph
-            {"recursion_limit": room.recursion_limit},
-        ):
-            print(s)
-            print("-----")
-            name = list(s.keys())[0]
-            try:
-                content = json.loads(s[name]["messages"][0].content)["response"]
-            except:
-                content = "Chat ended"
-                break
-            try:
-                hand = json.loads(s[name]["messages"][0].content)["hand"]
-            except:
-                hand = False
-            
-            # Assign color to each participant
-            experts_names = [expert["name"] for expert in room.all_participants if expert["name"] != "moderator"]
-            color = colors[experts_names.index(name) if name in experts_names else -1]
-            
-            # Display message in a box with unique color
-            st.markdown(f'<div style="background-color:{color};padding:10px;"><h3>{name}</h3>', unsafe_allow_html=True)
-            if hand:
-                st.markdown(f'<p><strong>Notification:</strong> {name} is raising his/her hands</p>', unsafe_allow_html=True)
-            if content !="":
-                st.markdown(f'<p>{content}</p></div>', unsafe_allow_html=True)
-            
-            if stop_button:
-                st.success('Chat stopped.')
-                break
+
+                    if mod_dict.get("end_convo"):
+                        st.success("Conversation ended by moderator.")
+                        break
+
+                    directed_to = mod_dict.get("directed_to", "general")
+                    if directed_to == "general":
+                        # pick random expert
+                        if room.experts:
+                            chosen_expert = random.choice(room.experts)
+                        else:
+                            # if no experts, break
+                            st.warning("No experts in the room.")
+                            break
+                    else:
+                        matched = [x for x in room.experts if x.name == directed_to]
+                        if matched:
+                            chosen_expert = matched[0]
+                        else:
+                            # fallback random if no match
+                            if room.experts:
+                                chosen_expert = random.choice(room.experts)
+                            else:
+                                st.warning("No experts in the room.")
+                                break
+
+                    # 2) Expert
+                    has_permission = mod_dict.get("go_ahead", False)
+                    expert_dict = room.generate_expert_response(chosen_expert, has_permission)
+
+                    # Add expert response to conversation
+                    room.conversation_history.append(
+                        AIMessage(content=json.dumps(expert_dict), name=chosen_expert.name)
+                    )
+
+                    # Display
+                    exp_color = random.choice(colors)
+                    if expert_dict.get("hand") and not expert_dict.get("response"):
+                        st.markdown(
+                            f"""
+                            <div style="background-color:{exp_color}; color:#000; padding:10px; margin-top:5px;">
+                                <strong>{expert_dict["sender"]}</strong> raised a hand.
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+                    elif expert_dict.get("response"):
+                        st.markdown(
+                            f"""
+                            <div style="background-color:{exp_color}; color:#000; padding:10px; margin-top:5px;">
+                                <strong>{expert_dict["sender"]}</strong>: {expert_dict["response"]}
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+
+                    if stop_button:
+                        st.warning("Conversation stopped by user.")
+                        break
+        else:
+            st.error("Please provide a topic before starting the chat.")
 
 
-
-
-
+if __name__ == "__main__":
+    main()
