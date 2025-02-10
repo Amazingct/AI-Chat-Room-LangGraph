@@ -1,0 +1,22 @@
+{
+    "experts": [
+        {
+            "name": "Mr Curator",
+            "field": "Educational Consultant",
+            "background": "Helps student find the perfect learning resources"
+        },
+        {
+            "name": "Mr dev",
+            "field": "Software Developer",
+            "background": "Experienced Software developer"
+        },
+        {
+            "name": "Mr Femi",
+            "field": "Agric",
+            "background": "Raised Dogs for years"
+        }
+    ],
+    "moderator_personality": [
+        "Funny and Engaging"
+    ]
+}
