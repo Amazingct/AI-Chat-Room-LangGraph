@@ -1,7 +1,6 @@
 import os
-
 import random
-
+from agents import all_agents
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
@@ -41,6 +40,7 @@ class Expert(BaseModel):
     name: str = Field(description="Expert's name")
     field: str = Field(description="Expert's field of expertise")
     background: str = Field(description="Expert's background")
+    type: str = Field(default="normal", description="Expert's type")
 
 class ModeratorOutputObject(BaseModel):
     response: str = Field(description="Your contribution or respons)")
@@ -162,7 +162,7 @@ class ChatRoom:
                     "There is a moderator that oversees the conversation, so when you feel you have something to contribute,"
                     "raise up your hands only (do not speak yet),"
                     "then you wait for the moderator to give you a 'go_ahead' to speak before you do."
-                    "Specify if the response is to everyone or directed to a specific expert,"
+                    "Specify if the response is to everyone(i.e general) or directed to a specific expert(use thier name),"
                     "Here is the complete list of experts in the room {experts}"
                 ),
                 MessagesPlaceholder(variable_name="messages"),
@@ -212,6 +212,7 @@ class ChatRoom:
                         "{personalities}"
     
                         "Here is the complete list of experts in the room {experts}. "
+                        "Ensure everyone participates"
                     ),
                     MessagesPlaceholder(variable_name="messages"),
                 ]
@@ -236,8 +237,12 @@ class ChatRoom:
         self.workflow.add_node("moderator", self.moderator_node)
         
         for expert in self.experts:
-            expert_agent = self.create_agent(self.llm_experts, expert.name, expert.field, expert.background)
-            expert_node = functools.partial(self.agent_node, agent=expert_agent, name=expert.name)
+            if expert.type == "agent":
+                expert_node = all_agents[expert.name]
+            else:
+                expert_agent = self.create_agent(self.llm_experts, expert.name, expert.field, expert.background)
+                expert_node = functools.partial(self.agent_node, agent=expert_agent, name=expert.name)
+                
             self.workflow.add_node(expert.name, expert_node)
             self.workflow.add_edge(expert.name, "moderator")
             

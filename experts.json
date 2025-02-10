@@ -3,17 +3,32 @@
         {
             "name": "Mr Curator",
             "field": "Educational Consultant",
-            "background": "Helps student find the perfect learning resources"
+            "background": "Helps student find the perfect learning resources",
+            "type": "normal"
         },
         {
             "name": "Mr dev",
             "field": "Software Developer",
-            "background": "Experienced Software developer"
+            "background": "Experienced Software developer",
+            "type": "normal"
         },
         {
             "name": "Mr Femi",
             "field": "Agric",
-            "background": "Raised Dogs for years"
+            "background": "Raised Dogs for years",
+            "type": "normal"
+        },
+        {
+            "name": "Newman",
+            "field": "Medicine",
+            "background": "Medicine",
+            "type": "normal"
+        },
+        {
+            "name": "danny",
+            "field": "Mathematician",
+            "background": "Mathematician",
+            "type": "agent"
         }
     ],
     "moderator_personality": [
