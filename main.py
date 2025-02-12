@@ -53,7 +53,7 @@ with st.sidebar.expander("Manage Moderator Personalities"):
         if new_personality.strip():
             room.add_moderator_personality(new_personality.strip())
             st.success(f"Moderator personality added: {new_personality}")
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.warning("Please provide a personality description.")
 
@@ -68,7 +68,7 @@ with st.sidebar.expander("Manage Moderator Personalities"):
         if st.button("Remove Personality"):
             room.remove_moderator_personality(personality_index)
             st.success("Removed personality!")
-            st.experimental_rerun()
+            st.rerun()
     else:
         st.info("No moderator personalities to remove.")
 

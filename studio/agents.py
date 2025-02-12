@@ -1,7 +1,11 @@
 
 from langchain_core.messages import SystemMessage
 from langchain_openai import ChatOpenAI
+from langchain_community.tools.tavily_search import TavilySearchResults
 import json
+from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+load_dotenv()
 from langchain_core.messages import (
     AIMessage,
 
@@ -12,42 +16,15 @@ from langchain_core.messages import (
 from langgraph.graph import START, StateGraph, MessagesState
 from langgraph.prebuilt import tools_condition, ToolNode
 
-def add(a: int, b: int) -> int:
-    """Adds a and b.
+search_function = TavilySearchResults(max_results=10)
 
-    Args:
-        a: first int
-        b: second int
-    """
-    print("USED USED")
-    return a + b
-
-def multiply(a: int, b: int) -> int:
-    """Multiplies a and b.
-
-    Args:
-        a: first int
-        b: second int
-    """
-    return a * b
-
-def divide(a: int, b: int) -> float:
-    """Divide a and b.
-
-    Args:
-        a: first int
-        b: second int
-    """
-    return a / b
-
-tools = [add, multiply, divide]
-
+tools = [search_function]
 # Define LLM with bound tools
 llm = ChatOpenAI(model="gpt-4o")
 llm_with_tools = llm.bind_tools(tools)
 
 # System message
-sys_msg = SystemMessage(content="You are a helpful assistant tasked with writing performing arithmetic on a set of inputs.")
+sys_msg = SystemMessage(content="You are a helpful research assitant who use current information and data from internet search result to provide insights")
 
 # Node
 def assistant(state: MessagesState):

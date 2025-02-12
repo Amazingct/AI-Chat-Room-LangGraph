@@ -7,31 +7,20 @@
             "type": "normal"
         },
         {
-            "name": "Mr dev",
-            "field": "Software Developer",
-            "background": "Experienced Software developer",
-            "type": "normal"
-        },
-        {
-            "name": "Mr Femi",
-            "field": "Agric",
-            "background": "Raised Dogs for years",
-            "type": "normal"
-        },
-        {
-            "name": "Newman",
-            "field": "Medicine",
-            "background": "Medicine",
-            "type": "normal"
-        },
-        {
             "name": "danny",
-            "field": "Mathematician",
-            "background": "Mathematician",
+            "field": "Researcher",
+            "background": "Researcher",
             "type": "agent"
+        },
+        {
+            "name": "Iron Man",
+            "field": "robotics",
+            "background": "The real iron man from marvel",
+            "type": "normal"
         }
     ],
     "moderator_personality": [
-        "Funny and Engaging"
+        "Funny and Engaging",
+        "like to quote the bible"
     ]
 }

@@ -21,6 +21,8 @@ trustcall = "^0.0.35"
 langgraph-cli = "^0.1.71"
 streamlit = "^1.42.0"
 python-dotenv = "^1.0.1"
+langchain-experimental = "^0.3.4"
+langchain-ollama = "^0.2.3"
 
 
 [build-system]

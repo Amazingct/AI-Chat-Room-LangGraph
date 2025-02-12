@@ -1,6 +1,9 @@
 import os
 import random
-from agents import all_agents
+try:
+    from agents import all_agents
+except:
+    from .agents import all_agents
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
@@ -12,7 +15,7 @@ from langchain_openai.chat_models import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from typing import List
-
+from langgraph.checkpoint.memory import MemorySaver
 
 from langgraph.graph import END, StateGraph
 import json
@@ -60,7 +63,7 @@ class OutputObject(BaseModel):
 
 
 
-EXPERTS_FILE = os.getenv("EXPERTS_FILE_PATH", [])
+EXPERTS_FILE = "studio/experts.json" if os.path.exists("studio/experts.json") else "experts.json"
 
 # %%
 
@@ -77,6 +80,7 @@ class ChatRoom:
         self.all_participants = None
         self.moderator_personality = []
         self.load_experts()
+        self.memory = MemorySaver()
         
 
     def load_experts(self):
@@ -162,7 +166,7 @@ class ChatRoom:
                     "There is a moderator that oversees the conversation, so when you feel you have something to contribute,"
                     "raise up your hands only (do not speak yet),"
                     "then you wait for the moderator to give you a 'go_ahead' to speak before you do."
-                    "Specify if the response is to everyone(i.e general) or directed to a specific expert(use thier name),"
+                    "Specify if the response is to  general or directed to a specific expert(use thier name),"
                     "Here is the complete list of experts in the room {experts}"
                 ),
                 MessagesPlaceholder(variable_name="messages"),
@@ -245,6 +249,9 @@ class ChatRoom:
                 
             self.workflow.add_node(expert.name, expert_node)
             self.workflow.add_edge(expert.name, "moderator")
+
+            #new
+            #self.workflow.add_edge( "moderator", expert.name)
             
         self.workflow.set_entry_point("moderator")
             
@@ -284,7 +291,7 @@ class ChatRoom:
                     )
                 ],
             },
-            {"recursion_limit": self.recursion_limit},
+            {"recursion_limit": self.recursion_limit}
         ):
             print(s)
             print("-----")
@@ -303,3 +310,6 @@ class ChatRoom:
 room = ChatRoom()
 room.chat_init()
 graph =room.graph
+
+
+
